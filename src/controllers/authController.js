@@ -1,9 +1,8 @@
-// controllers/authController.js
-
 import { client, twilioPhone } from '../config/twilioClient.js';
 import { otpStore, generateOTP } from '../utils/otpStore.js';
 import { auth } from '../config/firebase.js';
 
+// 1. Send Verification Code
 export const sendVerificationCode = async (req, res) => {
   const { phone } = req.body;
 
@@ -28,6 +27,10 @@ export const sendVerificationCode = async (req, res) => {
   }
 };
 
+
+
+
+// 2. Verify Code and Handle Login or Prompt Signup
 export const verifyCode = async (req, res) => {
   const { phone, code } = req.body;
 
@@ -54,29 +57,92 @@ export const verifyCode = async (req, res) => {
   delete otpStore[phone];
 
   try {
-    let user;
-
+    // Check if user exists
     try {
-      user = await auth.getUserByPhoneNumber(phone);
+      const user = await auth.getUserByPhoneNumber(phone);
+
+      // User exists, return token
+      const customToken = await auth.createCustomToken(user.uid);
+      return res.status(200).json({
+        success: true,
+        message: 'User logged in',
+        uid: user.uid,
+        customToken,
+        isNewUser: false
+      });
     } catch (err) {
-      // If user doesn't exist, create one
-      user = await auth.createUser({ phoneNumber: phone });
+      // User does not exist, prompt for signup
+      return res.status(200).json({
+        success: true,
+        message: 'OTP verified. Proceed to signup.',
+        phone,
+        isNewUser: true
+      });
     }
-
-    // Create a Firebase custom token
-    const customToken = await auth.createCustomToken(user.uid);
-
-    return res.status(200).json({
-      success: true,
-      message: 'OTP verified and Firebase user authenticated',
-      uid: user.uid,
-      customToken
-    });
   } catch (firebaseError) {
     return res.status(500).json({
       success: false,
       message: 'Firebase error',
       error: firebaseError.message
+    });
+  }
+};
+
+
+
+
+// 3. Complete Signup After OTP Verification
+export const completeSignup = async (req, res) => {
+  const { phone, name, email } = req.body;
+
+  if (!phone || !name) {
+    return res.status(400).json({ success: false, message: 'Phone and name are required' });
+  }
+
+  try {
+    const user = await auth.createUser({
+      phoneNumber: phone,
+      displayName: name,
+      email: email || undefined
+    });
+
+    const customToken = await auth.createCustomToken(user.uid);
+
+    res.status(201).json({
+      success: true,
+      message: 'Signup complete and user created',
+      uid: user.uid,
+      customToken
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to create user', error: error.message });
+  }
+};
+
+// 4. Get User by Phone Number
+export const getUserByPhone = async (req, res) => {
+  const { phone } = req.query;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, message: 'Phone number is required' });
+  }
+
+  try {
+    const user = await auth.getUserByPhoneNumber(phone);
+
+    return res.status(200).json({
+      success: true,
+      message: 'User found',
+      uid: user.uid,
+      phone: user.phoneNumber,
+      name: user.displayName,
+      email: user.email
+    });
+  } catch (error) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found',
+      error: error.message
     });
   }
 };
